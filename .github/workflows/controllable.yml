@@ -1,0 +1,107 @@
+name: Controllable pipeline
+
+# A pipeline you can steer from the "Run workflow" button or `gh workflow run`, so every factory
+# state can be shown on demand: success, a failure at any stage, a matrix, a cancel, a release.
+run-name: "Demo · fail_at=${{ inputs.fail_at }} · matrix=${{ inputs.matrix }} · cancel=${{ inputs.cancel_me }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      fail_at:
+        description: Where the pipeline should fail
+        type: choice
+        options: [none, lint, build, test]
+        default: none
+      delay_seconds:
+        description: Seconds each stage takes (1-60)
+        type: string
+        default: '8'
+      matrix:
+        description: Run the test stage as a two-lane matrix
+        type: boolean
+        default: false
+      cancel_me:
+        description: Cancel the run part-way through the test stage
+        type: boolean
+        default: false
+      release:
+        description: Include the (simulated) release stage
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+env:
+  DELAY: ${{ inputs.delay_seconds }}
+  FAIL_AT: ${{ inputs.fail_at }}
+
+jobs:
+  dependencies:
+    name: Dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install dependencies
+        run: |
+          d="$DELAY"; [[ "$d" =~ ^[0-9]+$ ]] && [ "$d" -le 60 ] || d=8
+          echo "Fetching named raw materials: npm-deps, cache"
+          sleep "$d"
+
+  lint:
+    name: Lint
+    needs: dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - name: Lint
+        run: |
+          d="$DELAY"; [[ "$d" =~ ^[0-9]+$ ]] && [ "$d" -le 60 ] || d=8
+          sleep "$d"
+          if [ "$FAIL_AT" = "lint" ]; then echo "::error::Lint failed on purpose"; exit 1; fi
+
+  build:
+    name: Build
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build
+        run: |
+          d="$DELAY"; [[ "$d" =~ ^[0-9]+$ ]] && [ "$d" -le 60 ] || d=8
+          sleep "$d"
+          if [ "$FAIL_AT" = "build" ]; then echo "::error::Build failed on purpose"; exit 1; fi
+
+  test:
+    name: Test (lane ${{ matrix.lane }})
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: ${{ fromJSON(inputs.matrix && '["A","B"]' || '["A"]') }}
+    steps:
+      - name: Test
+        run: |
+          d="$DELAY"; [[ "$d" =~ ^[0-9]+$ ]] && [ "$d" -le 60 ] || d=8
+          sleep "$d"
+          if [ "$FAIL_AT" = "test" ]; then echo "::error::Tests failed on purpose"; exit 1; fi
+      - name: Cancel this run
+        if: ${{ inputs.cancel_me && matrix.lane == 'A' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run cancel "${{ github.run_id }}" --repo "${{ github.repository }}"
+          sleep 30
+
+  release:
+    name: Release
+    needs: test
+    if: ${{ inputs.release }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish release (simulated)
+        run: |
+          d="$DELAY"; [[ "$d" =~ ^[0-9]+$ ]] && [ "$d" -le 60 ] || d=8
+          echo "Loading the rocket..."
+          sleep "$d"
